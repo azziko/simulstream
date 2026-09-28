@@ -79,7 +79,8 @@ class BaseStreamAtt(BaseSpeechProcessor):
         self.config = config
         text_history_config = self.config.text_history
         text_history_cls = class_load(text_history_config.type)
-        self.text_history_method = text_history_cls(text_history_config)
+        self.bow_prefix = getattr(self.config, "bow_prefix", BOW_PREFIX)
+        self.text_history_method = text_history_cls(text_history_config, self.bow_prefix)
         self.audio_subsampling_factor = getattr(self.config, "audio_subsampling_factor", 1)
         self.mel_hop_samples = getattr(self.config, "mel_hop_samples", 160)
         self.use_raw_audio_history = getattr(self.config, "use_raw_audio_history", False)
@@ -191,8 +192,7 @@ class BaseStreamAtt(BaseSpeechProcessor):
         # Check audio history not exceeding maximum allowed length
         self._cut_audio_exceeding_maxlen()
 
-    @staticmethod
-    def _strip_incomplete_words(tokens: List[str]) -> List[str]:
+    def _strip_incomplete_words(self, tokens: List[str]) -> List[str]:
         """
         Remove last incomplete word(s) from the new hypothesis.
 
@@ -207,7 +207,7 @@ class BaseStreamAtt(BaseSpeechProcessor):
         num_tokens_incomplete = 0
         for tok in reversed(tokens):
             num_tokens_incomplete += 1
-            if tok.startswith(BOW_PREFIX):
+            if tok.startswith(self.bow_prefix):
                 # slice off the trailing incomplete tokens
                 tokens_to_write = tokens[:-num_tokens_incomplete]
                 break
@@ -282,11 +282,10 @@ class FixedWordsTextHistory:
     """
     Fixed Words textual history selection method that retains a pre-defined
     number of words in the history (*history_words*).
-
-    The current implementation supports only SentencePiece.
     """
     def __init__(self, config: SimpleNamespace):
         self.history_words = getattr(config, "history_words", 20)
+        self.bow_prefix = getattr(config, "bow_prefix", BOW_PREFIX)
         self.config = config
 
     def select_text_history(self, text_history: List[str]):
@@ -294,9 +293,9 @@ class FixedWordsTextHistory:
         new_history = []
         for token in reversed(text_history):
             new_history.append(token)
-            # Check if 'BOW_PREFIX' (space in SentencePiece) is contained in the token,
-            # meaning that we reached the beginning of the word that should be counted
-            if BOW_PREFIX in token:
+            # Check if bow_prefix is contained in the token, meaning that we reached
+            # the beginning of the word that should be counted
+            if self.bow_prefix in token:
                 words_to_keep -= 1
                 # When all the words to keep are consumed, the accumulation is stopped
                 # and the prefix is returned
@@ -304,6 +303,27 @@ class FixedWordsTextHistory:
                     break
         # Reverse the list
         return new_history[::-1]
+
+
+class FixedCharsTextHistory:
+    """
+    Character-count-based textual history selection method that retains a pre-defined number of
+    tokens in the history (*history_chars*).
+
+    Recommended for character-level languages (e.g., Chinese, Japanese) where word-boundary
+    markers (▁) are sparse, making :class:`FixedWordsTextHistory` ineffective: when few tokens
+    carry a BOW prefix, the word counter never reaches *history_words*, so the history is never
+    trimmed and the audio history grows without bound, causing AlignAtt to cut all new tokens.
+
+    Args:
+        config (SimpleNamespace): Configuration object with an optional attribute:
+            - **history_chars (int)**: Number of tokens to retain. Defaults to 20.
+    """
+    def __init__(self, config: SimpleNamespace):
+        self.history_chars = getattr(config, "history_chars", 20)
+
+    def select_text_history(self, text_history: List[str]) -> List[str]:
+        return text_history[-self.history_chars:]
 
 
 class PunctuationTextHistory:
