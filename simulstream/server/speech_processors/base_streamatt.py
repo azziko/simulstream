@@ -80,7 +80,7 @@ class BaseStreamAtt(BaseSpeechProcessor):
         text_history_config = self.config.text_history
         text_history_cls = class_load(text_history_config.type)
         self.bow_prefix = getattr(self.config, "bow_prefix", BOW_PREFIX)
-        self.text_history_method = text_history_cls(text_history_config, self.bow_prefix)
+        self.text_history_method = text_history_cls(text_history_config)
         self.audio_subsampling_factor = getattr(self.config, "audio_subsampling_factor", 1)
         self.mel_hop_samples = getattr(self.config, "mel_hop_samples", 160)
         self.use_raw_audio_history = getattr(self.config, "use_raw_audio_history", False)
